@@ -3,12 +3,14 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
 // Game Variables
+const playerColor = 'rgba(50, 150, 255, 1)'; // A distinct blue
+const opponentColor = 'rgba(255, 100, 100, 1)'; // A distinct red
 const paddleWidth = 10;
 const paddleHeight = 100;
 const ballRadius = 7;
 let playerScore = 0;
 let opponentScore = 0;
-const winningScore = 5; // Or any score you prefer
+const winningScore = 10; // Or any score you prefer
 const initialBallSpeedX = 5; // Initial horizontal speed of the ball
 const speedIncrement = 0.2; // How much the ball speeds up on each paddle hit
 
@@ -31,6 +33,53 @@ const flashDuration = 15; // Approx 0.25 seconds at 60FPS
 // Screen Shake Effect
 let shakeDuration = 0; // Duration of the shake in frames
 const shakeIntensity = 5; // Max pixel offset for the shake
+
+// Gravity Points
+let gravityPoints = [];
+const gravityPointSpawnInterval = 3000; // milliseconds (3 seconds)
+const gravityPointSize = 10;
+const gravityPointStrength = 3; // Adjusted for less aggressive pull initially
+const gravityPointFallSpeed = 1;
+const gravityPointColor = 'yellow'; // Added constant for color
+let framesSinceLastSpawn = 0;
+
+// Orbit Effect Variables
+let orbitEffectAngle = 0;
+const orbitFrequency = 0.05; // Adjust for faster/slower wobble
+const orbitAmplitude = 0.1;  // Adjust for more/less pronounced wobble
+
+class GravityPoint {
+    constructor(x, y, size, strength, fallSpeed, color = gravityPointColor) { // Use the constant
+        this.x = x;
+        this.y = y;
+        this.size = size;
+        this.strength = strength;
+        this.fallSpeed = fallSpeed;
+        this.color = color;
+        this.active = true;
+    }
+
+    update() {
+        this.y += this.fallSpeed;
+        if (this.y - this.size > canvas.height) {
+            this.active = false;
+        }
+    }
+
+    draw(ctx) {
+        if (!this.active) return;
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function spawnGravityPoint() {
+    const x = Math.random() * (canvas.width - gravityPointSize * 2) + gravityPointSize; // Ensure it's fully within canvas width
+    const y = -gravityPointSize; 
+    gravityPoints.push(new GravityPoint(x, y, gravityPointSize, gravityPointStrength, gravityPointFallSpeed, gravityPointColor));
+}
 
 // Game State Screens
 function drawStartScreen() {
@@ -131,6 +180,7 @@ class Ball {
     this.color = color;
     this.speedX = speedX;
     this.speedY = speedY;
+    this.lastHitBy = null; // 'player' or 'opponent'
   }
 
   draw() {
@@ -143,8 +193,8 @@ class Ball {
 }
 
 // Game Objects
-const player = new Paddle(0, canvas.height / 2 - paddleHeight / 2, paddleWidth, paddleHeight, 'blue', 8);
-const opponent = new Paddle(canvas.width - paddleWidth, canvas.height / 2 - paddleHeight / 2, paddleWidth, paddleHeight, 'red', 8);
+const player = new Paddle(0, canvas.height / 2 - paddleHeight / 2, paddleWidth, paddleHeight, playerColor, 8);
+const opponent = new Paddle(canvas.width - paddleWidth, canvas.height / 2 - paddleHeight / 2, paddleWidth, paddleHeight, opponentColor, 8);
 const ball = new Ball(canvas.width / 2, canvas.height / 2, ballRadius, 'white', initialBallSpeedX, 5);
 
 // Scoreboard
@@ -200,8 +250,12 @@ function resetGame() {
   resetBall();
   ball.x = canvas.width / 2; // Ensure ball starts in center
   ball.y = canvas.height / 2;
+  ball.lastHitBy = null; // Reset who last hit the ball
   player.y = canvas.height / 2 - paddleHeight / 2; // Reset player paddle
   opponent.y = canvas.height / 2 - paddleHeight / 2; // Reset opponent paddle
+  gravityPoints = []; // Clear existing gravity points
+  framesSinceLastSpawn = 0; // Reset spawn timer
+  orbitEffectAngle = 0; // Reset orbit angle
   gameState = 'playing';
 }
 
@@ -234,8 +288,73 @@ function gameLoop() {
   }
 
   if (gameState === 'startScreen') {
+    drawPaddles(); // Draw paddles in their initial position
+    drawBall(); // Draw ball in its initial position
     drawStartScreen();
   } else if (gameState === 'playing') {
+    // Spawn Gravity Points
+    framesSinceLastSpawn++;
+    if ((framesSinceLastSpawn * (1000 / 60)) >= gravityPointSpawnInterval) { // Assuming 60 FPS
+        spawnGravityPoint();
+        framesSinceLastSpawn = 0;
+    }
+
+    // Update and Draw Gravity Points
+    for (let i = gravityPoints.length - 1; i >= 0; i--) {
+        const point = gravityPoints[i];
+        point.update();
+        if (!point.active) {
+            gravityPoints.splice(i, 1);
+        }
+    }
+
+    // Apply Gravity Pull
+    for (const point of gravityPoints) {
+        if (!point.active) continue;
+        const dx = point.x - ball.x;
+        const dy = point.y - ball.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const activationRadius = 150; 
+
+        if (distance < activationRadius && distance > 0) {
+            const forceMagnitude = point.strength / (distance * distance); // Simple inverse square
+            let forceX = (dx / distance) * forceMagnitude;
+            let forceY = (dy / distance) * forceMagnitude;
+
+            // Cap the force to prevent extreme acceleration
+            const maxForce = 0.1; // Adjust as needed
+            const totalForce = Math.sqrt(forceX * forceX + forceY * forceY);
+            if (totalForce > maxForce) {
+                forceX = (forceX / totalForce) * maxForce;
+                forceY = (forceY / totalForce) * maxForce;
+            }
+            
+            ball.speedX += forceX;
+            ball.speedY += forceY;
+        }
+    }
+
+    // Apply Orbit Effect
+    orbitEffectAngle += 1;
+    const currentSpeed = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
+    if (currentSpeed > 0) { // Avoid division by zero and effect on stationary ball
+        const dirX = ball.speedX / currentSpeed;
+        const dirY = ball.speedY / currentSpeed;
+        const perpX = -dirY;
+        const perpY = dirX;
+        const orbitForce = Math.sin(orbitEffectAngle * orbitFrequency) * orbitAmplitude;
+        ball.speedX += perpX * orbitForce;
+        ball.speedY += perpY * orbitForce;
+    }
+    
+    // Cap overall ball speed AFTER gravity and orbit effects
+    const maxBallSpeed = 10; // Adjust as needed
+    const newSpeed = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
+    if (newSpeed > maxBallSpeed) {
+        ball.speedX = (ball.speedX / newSpeed) * maxBallSpeed;
+        ball.speedY = (ball.speedY / newSpeed) * maxBallSpeed;
+    }
+
     // Ball Movement
     ball.x += ball.speedX;
     ball.y += ball.speedY;
@@ -249,88 +368,131 @@ function gameLoop() {
     // Collision Detection: Ball with paddles
     // Player paddle
     if (ball.x - ball.radius < player.x + player.width &&
-        ball.x - ball.radius > player.x && // Ensure ball is coming from right
+        ball.x - ball.radius > player.x && 
         ball.y + ball.radius > player.y &&
         ball.y - ball.radius < player.y + player.height &&
-        ball.speedX < 0) { // Ensure ball is moving towards player
-      ball.speedX = -ball.speedX; // Reverse direction
-      ball.speedX += speedIncrement; // Increase speed
-      // Add some spin based on where it hits the paddle
+        ball.speedX < 0) { 
+      ball.speedX = -ball.speedX; 
+      ball.speedX += speedIncrement; 
       let deltaY = ball.y - (player.y + player.height / 2);
-      ball.speedY = deltaY * 0.35; // The 0.35 is a factor to control spin intensity
+      ball.speedY = deltaY * 0.35; 
       paddleHitSound.play();
-      createParticles(player.x + player.width, ball.y, 1); // Sparks to the right
+      createParticles(player.x + player.width, ball.y, 1);
+      ball.lastHitBy = 'player';
     }
     // Opponent paddle
     if (ball.x + ball.radius > opponent.x &&
-        ball.x + ball.radius < opponent.x + opponent.width && // Ensure ball is coming from left
+        ball.x + ball.radius < opponent.x + opponent.width && 
         ball.y + ball.radius > opponent.y &&
         ball.y - ball.radius < opponent.y + opponent.height &&
-        ball.speedX > 0) { // Ensure ball is moving towards opponent
-      ball.speedX = -ball.speedX; // Reverse direction
-      ball.speedX -= speedIncrement; // Increase speed (make it more negative)
-       // Add some spin based on where it hits the paddle
+        ball.speedX > 0) { 
+      ball.speedX = -ball.speedX; 
+      ball.speedX -= speedIncrement; 
       let deltaY = ball.y - (opponent.y + opponent.height / 2);
       ball.speedY = deltaY * 0.35; 
       paddleHitSound.play();
-      createParticles(opponent.x, ball.y, -1); // Sparks to the left
+      createParticles(opponent.x, ball.y, -1);
+      ball.lastHitBy = 'opponent';
     }
 
-    // Scoring
-    if (ball.x - ball.radius < 0) { // Opponent scores
-      opponentScore++;
-      scoreSound.play();
-      flashSide = 'right'; // Opponent scored on the right side of player
-      flashTimer = flashDuration;
-      shakeDuration = 15; // Trigger screen shake
-      if (opponentScore >= winningScore) {
-        winner = 'Opponent';
-        gameState = 'gameOver';
-      } else {
-        resetBall();
-      }
-    } else if (ball.x + ball.radius > canvas.width) { // Player scores
-      playerScore++;
-      scoreSound.play();
-      flashSide = 'left'; // Player scored on the left side of opponent
-      flashTimer = flashDuration;
-      shakeDuration = 15; // Trigger screen shake
-      if (playerScore >= winningScore) {
-        winner = 'Player';
-        gameState = 'gameOver';
-      } else {
-        resetBall();
-      }
+    // Collision Detection: Ball with Gravity Points
+    for (let i = gravityPoints.length - 1; i >= 0; i--) {
+        const point = gravityPoints[i];
+        if (!point.active) continue;
+
+        const dx = point.x - ball.x;
+        const dy = point.y - ball.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < ball.radius + point.size) {
+            point.active = false; // Remove point
+            // Optional: Play collection sound
+            // Optional: Create collection particles
+            if (ball.lastHitBy === 'player') {
+                playerScore++;
+            } else if (ball.lastHitBy === 'opponent') {
+                opponentScore++;
+            }
+            updateScoreboard(); // Update score immediately
+            // Check for winner after collecting a point
+            if (playerScore >= winningScore) {
+                winner = 'Player';
+                gameState = 'gameOver';
+            } else if (opponentScore >= winningScore) {
+                winner = 'Opponent';
+                gameState = 'gameOver';
+            }
+        }
+    }
+    gravityPoints = gravityPoints.filter(p => p.active);
+
+
+    // Scoring (Out of Bounds)
+    if (gameState === 'playing') { // Check if still playing before this scoring
+        if (ball.x - ball.radius < 0) { // Opponent scores
+            opponentScore++;
+            scoreSound.play();
+            flashSide = 'right'; 
+            flashTimer = flashDuration;
+            shakeDuration = 15; 
+            if (opponentScore >= winningScore) {
+                winner = 'Opponent';
+                gameState = 'gameOver';
+            } else {
+                resetBall();
+            }
+        } else if (ball.x + ball.radius > canvas.width) { // Player scores
+            playerScore++;
+            scoreSound.play();
+            flashSide = 'left'; 
+            flashTimer = flashDuration;
+            shakeDuration = 15; 
+            if (playerScore >= winningScore) {
+                winner = 'Player';
+                gameState = 'gameOver';
+            } else {
+                resetBall();
+            }
+        }
     }
     
     // Player Paddle Movement (Mouse) - already handled by event listener
 
     // Basic Opponent AI (follows the ball)
-    const opponentLevel = 0.05; // How quickly the opponent reacts
-    opponent.y += (ball.y - (opponent.y + opponent.height / 2)) * opponentLevel;
+    const opponentLevel = 0.05; // How quickly the opponent reacts (determines how fast it tries to reach the ball's y)
+    let targetY = ball.y - (opponent.height / 2);
+    let idealMove = (targetY - opponent.y) * opponentLevel;
+    
+    // Cap the movement by opponent.speed
+    const actualMove = Math.max(-opponent.speed, Math.min(opponent.speed, idealMove));
+    opponent.y += actualMove;
+
      // Keep opponent paddle within canvas bounds
     if (opponent.y < 0) {
       opponent.y = 0;
     }
     if (opponent.y + opponent.height > canvas.height) {
-      opponent.y = canvas.height - player.height; // Corrected to player.height, should be opponent.height
+      opponent.y = canvas.height - opponent.height; 
     }
     
     drawPaddles();
     drawBall();
-    handleParticles();
+    handleParticles(); // Visual particles for paddle hits
+    gravityPoints.forEach(point => point.draw(ctx)); // Draw gravity points
     updateScoreboard();
 
   } else if (gameState === 'paused') {
     drawPaddles();
     drawBall();
     handleParticles(); // Keep particles animating
+    gravityPoints.forEach(point => point.draw(ctx)); // Draw gravity points
     updateScoreboard();
     drawPauseScreen();
   } else if (gameState === 'gameOver') {
     drawPaddles();
     drawBall();
     handleParticles(); // Keep particles animating
+    gravityPoints.forEach(point => point.draw(ctx)); // Draw gravity points
     updateScoreboard();
     drawGameOverScreen();
   }
@@ -389,5 +551,5 @@ window.addEventListener('keydown', function(event) {
 
 
 // Start Game
-updateScoreboard(); // Initial scoreboard display
+// updateScoreboard(); // Initial scoreboard display - now handled in resetGame/gameLoop
 gameLoop();
