@@ -13,6 +13,7 @@ let opponentScore = 0;
 const winningScore = 10; // Or any score you prefer
 const initialBallSpeedX = 5; // Initial horizontal speed of the ball
 const speedIncrement = 0.2; // How much the ball speeds up on each paddle hit
+const boostMultiplier = 1.8; // For slingshot effect
 
 let gameState = 'startScreen'; // Possible values: 'startScreen', 'playing', 'paused', 'gameOver'
 let winner = null; // To store the winner of the game
@@ -38,9 +39,9 @@ const shakeIntensity = 5; // Max pixel offset for the shake
 let gravityPoints = [];
 const gravityPointSpawnInterval = 3000; // milliseconds (3 seconds)
 const gravityPointSize = 10;
-const gravityPointStrength = 3; // Adjusted for less aggressive pull initially
+const gravityPointStrength = 15; // Significantly increased strength
 const gravityPointFallSpeed = 1;
-const gravityPointColor = 'yellow'; // Added constant for color
+const gravityPointColor = 'yellow';
 let framesSinceLastSpawn = 0;
 
 // Orbit Effect Variables
@@ -49,7 +50,7 @@ const orbitFrequency = 0.05; // Adjust for faster/slower wobble
 const orbitAmplitude = 0.1;  // Adjust for more/less pronounced wobble
 
 class GravityPoint {
-    constructor(x, y, size, strength, fallSpeed, color = gravityPointColor) { // Use the constant
+    constructor(x, y, size, strength, fallSpeed, color = gravityPointColor) {
         this.x = x;
         this.y = y;
         this.size = size;
@@ -76,7 +77,7 @@ class GravityPoint {
 }
 
 function spawnGravityPoint() {
-    const x = Math.random() * (canvas.width - gravityPointSize * 2) + gravityPointSize; // Ensure it's fully within canvas width
+    const x = Math.random() * (canvas.width - gravityPointSize * 2) + gravityPointSize;
     const y = -gravityPointSize; 
     gravityPoints.push(new GravityPoint(x, y, gravityPointSize, gravityPointStrength, gravityPointFallSpeed, gravityPointColor));
 }
@@ -90,8 +91,9 @@ function drawStartScreen() {
   ctx.font = '20px Arial';
   ctx.fillText('Press ENTER to Start', canvas.width / 2, canvas.height / 2);
   ctx.font = '16px Arial';
-  ctx.fillText('Move your paddle with the mouse. First to 5 points wins.', canvas.width / 2, canvas.height / 2 + 40);
+  ctx.fillText('Move your paddle with the mouse. First to ' + winningScore + ' points wins.', canvas.width / 2, canvas.height / 2 + 40);
   ctx.fillText("Press 'P' to Pause/Resume during gameplay.", canvas.width / 2, canvas.height / 2 + 70);
+  ctx.fillText("Collect yellow orbs for points, or use their gravity to 'slingshot' the ball!", canvas.width / 2, canvas.height / 2 + 100);
 }
 
 function drawPauseScreen() {
@@ -106,16 +108,24 @@ function drawPauseScreen() {
 }
 
 function drawGameOverScreen() {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  let winnerColorFill = 'rgba(0, 0, 0, 0.7)'; 
+  if (winner === 'Player') {
+    winnerColorFill = player.color;
+  } else if (winner === 'Opponent') {
+    winnerColorFill = opponent.color;
+  }
+
+  ctx.fillStyle = winnerColorFill;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = 'white';
+
+  ctx.fillStyle = 'white'; 
   ctx.font = '40px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 40);
-  ctx.font = '25px Arial';
+  ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 60);
+  ctx.font = '30px Arial'; 
   ctx.fillText(`${winner} wins!`, canvas.width / 2, canvas.height / 2);
   ctx.font = '20px Arial';
-  ctx.fillText('Press ENTER to Play Again', canvas.width / 2, canvas.height / 2 + 40);
+  ctx.fillText('Press ENTER to Play Again', canvas.width / 2, canvas.height / 2 + 50);
 }
 
 class Particle {
@@ -126,7 +136,7 @@ class Particle {
     this.vy = vy;
     this.size = size;
     this.color = color;
-    this.life = life; // Lifespan in frames
+    this.life = life; 
   }
 
   update() {
@@ -142,14 +152,14 @@ class Particle {
 }
 
 function createParticles(x, y, direction) {
-  const count = 10; // Number of particles
+  const count = 10; 
   for (let i = 0; i < count; i++) {
-    const speed = Math.random() * 2 + 1; // Random speed between 1 and 3
-    const angle = (Math.random() - 0.5) * Math.PI / 2; // Spread angle (e.g., -45 to +45 degrees from impact normal)
+    const speed = Math.random() * 2 + 1; 
+    const angle = (Math.random() - 0.5) * Math.PI / 2; 
     const vx = Math.cos(angle) * speed * direction;
     const vy = Math.sin(angle) * speed;
-    const size = Math.random() * 2 + 1; // Random size between 1 and 3
-    const life = Math.random() * 30 + 30; // Random lifespan (30-60 frames)
+    const size = Math.random() * 2 + 1; 
+    const life = Math.random() * 30 + 30; 
     particles.push(new Particle(x, y, vx, vy, size, 'white', life));
   }
 }
@@ -181,6 +191,7 @@ class Ball {
     this.speedX = speedX;
     this.speedY = speedY;
     this.lastHitBy = null; // 'player' or 'opponent'
+    this.slingshotCandidatePoint = null; // Stores the gravity point the ball might slingshot from
   }
 
   draw() {
@@ -194,7 +205,7 @@ class Ball {
 
 // Game Objects
 const player = new Paddle(0, canvas.height / 2 - paddleHeight / 2, paddleWidth, paddleHeight, playerColor, 8);
-const opponent = new Paddle(canvas.width - paddleWidth, canvas.height / 2 - paddleHeight / 2, paddleWidth, paddleHeight, opponentColor, 8);
+const opponent = new Paddle(canvas.width - paddleWidth, canvas.height / 2 - paddleHeight / 2, paddleWidth, paddleHeight, opponentColor, 10); // Increased speed from 8 to 10
 const ball = new Ball(canvas.width / 2, canvas.height / 2, ballRadius, 'white', initialBallSpeedX, 5);
 
 // Scoreboard
@@ -207,7 +218,6 @@ function updateScoreboard() {
 
 // Clear Canvas
 function clearCanvas() {
-  // Fill the canvas with a semi-transparent black to create a trail effect
   ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
@@ -238,31 +248,31 @@ function handleParticles() {
 function resetBall() {
   ball.x = canvas.width / 2;
   ball.y = canvas.height / 2;
-  // Reset ball speed to initial values, alternating direction
-  ball.speedX = (ball.speedX > 0 ? -initialBallSpeedX : initialBallSpeedX); // Keep alternating direction
-  ball.speedY = (Math.random() > 0.5 ? 1 : -1) * (Math.random() * 2 + 3); // Random initial Y speed
+  ball.speedX = (ball.speedX > 0 ? -initialBallSpeedX : initialBallSpeedX); 
+  ball.speedY = (Math.random() > 0.5 ? 1 : -1) * (Math.random() * 2 + 3); 
+  ball.slingshotCandidatePoint = null; // Reset slingshot candidate on ball reset
 }
 
 function resetGame() {
   playerScore = 0;
   opponentScore = 0;
   updateScoreboard();
-  resetBall();
-  ball.x = canvas.width / 2; // Ensure ball starts in center
+  resetBall(); 
+  ball.x = canvas.width / 2; 
   ball.y = canvas.height / 2;
-  ball.lastHitBy = null; // Reset who last hit the ball
-  player.y = canvas.height / 2 - paddleHeight / 2; // Reset player paddle
-  opponent.y = canvas.height / 2 - paddleHeight / 2; // Reset opponent paddle
-  gravityPoints = []; // Clear existing gravity points
-  framesSinceLastSpawn = 0; // Reset spawn timer
-  orbitEffectAngle = 0; // Reset orbit angle
+  ball.lastHitBy = null; 
+  player.y = canvas.height / 2 - paddleHeight / 2; 
+  opponent.y = canvas.height / 2 - paddleHeight / 2; 
+  gravityPoints = []; 
+  framesSinceLastSpawn = 0; 
+  orbitEffectAngle = 0; 
   gameState = 'playing';
 }
 
 // Game Loop
 function gameLoop() {
   let shookThisFrame = false;
-  if (shakeDuration > 0 && gameState === 'playing') { // Only shake if playing
+  if (shakeDuration > 0 && gameState === 'playing') { 
     ctx.save();
     const offsetX = (Math.random() - 0.5) * 2 * shakeIntensity;
     const offsetY = (Math.random() - 0.5) * 2 * shakeIntensity;
@@ -273,9 +283,8 @@ function gameLoop() {
 
   clearCanvas();
 
-  // Draw flash effect if active (and game is playing or paused)
   if (flashTimer > 0 && (gameState === 'playing' || gameState === 'paused')) {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; // Semi-transparent white
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; 
     if (flashSide === 'left') {
       ctx.fillRect(0, 0, canvas.width / 2, canvas.height);
     } else if (flashSide === 'right') {
@@ -288,27 +297,34 @@ function gameLoop() {
   }
 
   if (gameState === 'startScreen') {
-    drawPaddles(); // Draw paddles in their initial position
-    drawBall(); // Draw ball in its initial position
+    drawPaddles(); 
+    drawBall(); 
     drawStartScreen();
   } else if (gameState === 'playing') {
+    let slingshotBoostAppliedThisFrame = false;
+
     // Spawn Gravity Points
     framesSinceLastSpawn++;
-    if ((framesSinceLastSpawn * (1000 / 60)) >= gravityPointSpawnInterval) { // Assuming 60 FPS
+    if ((framesSinceLastSpawn * (1000 / 60)) >= gravityPointSpawnInterval) {
         spawnGravityPoint();
         framesSinceLastSpawn = 0;
     }
 
-    // Update and Draw Gravity Points
+    // Update Gravity Points (movement and off-screen removal)
     for (let i = gravityPoints.length - 1; i >= 0; i--) {
         const point = gravityPoints[i];
         point.update();
-        if (!point.active) {
+        if (!point.active) { // Check if point moved off-screen
             gravityPoints.splice(i, 1);
+            if (ball.slingshotCandidatePoint === point) { // If it was a candidate, nullify
+                ball.slingshotCandidatePoint = null;
+            }
         }
     }
-
-    // Apply Gravity Pull
+    
+    // Apply Gravity Pull & Update Slingshot Candidate
+    // The candidate is the last point in the array that influences the ball this frame.
+    // If a point was a candidate and is no longer influencing, the escape check handles it.
     for (const point of gravityPoints) {
         if (!point.active) continue;
         const dx = point.x - ball.x;
@@ -317,45 +333,59 @@ function gameLoop() {
         const activationRadius = 150; 
 
         if (distance < activationRadius && distance > 0) {
-            const forceMagnitude = point.strength / (distance * distance); // Simple inverse square
+            const forceMagnitude = point.strength / (distance * distance);
             let forceX = (dx / distance) * forceMagnitude;
             let forceY = (dy / distance) * forceMagnitude;
-
-            // Cap the force to prevent extreme acceleration
-            const maxForce = 0.1; // Adjust as needed
+            const maxForce = 0.5;
             const totalForce = Math.sqrt(forceX * forceX + forceY * forceY);
             if (totalForce > maxForce) {
                 forceX = (forceX / totalForce) * maxForce;
                 forceY = (forceY / totalForce) * maxForce;
             }
-            
             ball.speedX += forceX;
             ball.speedY += forceY;
+            ball.slingshotCandidatePoint = point; // Update current influencer
         }
     }
-
+    
     // Apply Orbit Effect
     orbitEffectAngle += 1;
-    const currentSpeed = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
-    if (currentSpeed > 0) { // Avoid division by zero and effect on stationary ball
-        const dirX = ball.speedX / currentSpeed;
-        const dirY = ball.speedY / currentSpeed;
+    const currentBallSpeed = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
+    if (currentBallSpeed > 0) {
+        const dirX = ball.speedX / currentBallSpeed;
+        const dirY = ball.speedY / currentBallSpeed;
         const perpX = -dirY;
         const perpY = dirX;
         const orbitForce = Math.sin(orbitEffectAngle * orbitFrequency) * orbitAmplitude;
         ball.speedX += perpX * orbitForce;
         ball.speedY += perpY * orbitForce;
     }
+
+    // Slingshot by ESCAPE logic
+    if (ball.slingshotCandidatePoint && ball.slingshotCandidatePoint.active && !slingshotBoostAppliedThisFrame) {
+        const dxCandidate = ball.slingshotCandidatePoint.x - ball.x;
+        const dyCandidate = ball.slingshotCandidatePoint.y - ball.y;
+        const distanceToCandidate = Math.sqrt(dxCandidate * dxCandidate + dyCandidate * dyCandidate);
+        const activationRadius = 150; 
+
+        if (distanceToCandidate > activationRadius) { 
+            ball.speedX *= boostMultiplier;
+            ball.speedY *= boostMultiplier;
+            // console.log("Slingshot by ESCAPING radius!");
+            ball.slingshotCandidatePoint = null; 
+            slingshotBoostAppliedThisFrame = true;
+        }
+    }
     
-    // Cap overall ball speed AFTER gravity and orbit effects
-    const maxBallSpeed = 10; // Adjust as needed
-    const newSpeed = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
-    if (newSpeed > maxBallSpeed) {
-        ball.speedX = (ball.speedX / newSpeed) * maxBallSpeed;
-        ball.speedY = (ball.speedY / newSpeed) * maxBallSpeed;
+    // Cap overall ball speed
+    const maxBallSpeed = 15; 
+    let currentSpeedMagnitude = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
+    if (currentSpeedMagnitude > maxBallSpeed) {
+        ball.speedX = (ball.speedX / currentSpeedMagnitude) * maxBallSpeed;
+        ball.speedY = (ball.speedY / currentSpeedMagnitude) * maxBallSpeed;
     }
 
-    // Ball Movement
+    // Ball Movement (actual position update)
     ball.x += ball.speedX;
     ball.y += ball.speedY;
 
@@ -379,6 +409,7 @@ function gameLoop() {
       paddleHitSound.play();
       createParticles(player.x + player.width, ball.y, 1);
       ball.lastHitBy = 'player';
+      ball.slingshotCandidatePoint = null; // Paddle hit resets slingshot candidate
     }
     // Opponent paddle
     if (ball.x + ball.radius > opponent.x &&
@@ -393,6 +424,7 @@ function gameLoop() {
       paddleHitSound.play();
       createParticles(opponent.x, ball.y, -1);
       ball.lastHitBy = 'opponent';
+      ball.slingshotCandidatePoint = null; // Paddle hit resets slingshot candidate
     }
 
     // Collision Detection: Ball with Gravity Points
@@ -404,29 +436,42 @@ function gameLoop() {
         const dy = point.y - ball.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (distance < ball.radius + point.size) {
-            point.active = false; // Remove point
-            // Optional: Play collection sound
-            // Optional: Create collection particles
+        if (distance < ball.radius + point.size) { // Collision with gravity point
+            // Slingshot effect if this point was the candidate and is now being collected
+            if (ball.slingshotCandidatePoint === point && !slingshotBoostAppliedThisFrame) { 
+                ball.speedX *= boostMultiplier;
+                ball.speedY *= boostMultiplier;
+                // console.log("Slingshot by COLLECTING point: ", point.x, point.y);
+                slingshotBoostAppliedThisFrame = true;
+            }
+            ball.slingshotCandidatePoint = null; // Point is collected, so it can't be a candidate
+            point.active = false; // Deactivate the point
+            
             if (ball.lastHitBy === 'player') {
                 playerScore++;
             } else if (ball.lastHitBy === 'opponent') {
                 opponentScore++;
             }
-            updateScoreboard(); // Update score immediately
-            // Check for winner after collecting a point
-            if (playerScore >= winningScore) {
-                winner = 'Player';
+            updateScoreboard(); 
+            if (playerScore >= winningScore || opponentScore >= winningScore) {
+                winner = playerScore >= winningScore ? 'Player' : 'Opponent';
                 gameState = 'gameOver';
-            } else if (opponentScore >= winningScore) {
-                winner = 'Opponent';
-                gameState = 'gameOver';
+                break; // Exit loop early if game is over
             }
         }
     }
-    gravityPoints = gravityPoints.filter(p => p.active);
+    if (gameState !== 'gameOver') { // Only filter if game is not over
+        gravityPoints = gravityPoints.filter(p => p.active);
+    }
 
 
+    // Final speed cap after all modifications, including collection slingshot
+    currentSpeedMagnitude = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
+    if (currentSpeedMagnitude > maxBallSpeed) { // Ensure this uses the updated maxBallSpeed
+        ball.speedX = (ball.speedX / currentSpeedMagnitude) * maxBallSpeed;
+        ball.speedY = (ball.speedY / currentSpeedMagnitude) * maxBallSpeed;
+    }
+    
     // Scoring (Out of Bounds)
     if (gameState === 'playing') { // Check if still playing before this scoring
         if (ball.x - ball.radius < 0) { // Opponent scores
@@ -459,15 +504,13 @@ function gameLoop() {
     // Player Paddle Movement (Mouse) - already handled by event listener
 
     // Basic Opponent AI (follows the ball)
-    const opponentLevel = 0.05; // How quickly the opponent reacts (determines how fast it tries to reach the ball's y)
+    const opponentLevel = 0.05; 
     let targetY = ball.y - (opponent.height / 2);
     let idealMove = (targetY - opponent.y) * opponentLevel;
     
-    // Cap the movement by opponent.speed
     const actualMove = Math.max(-opponent.speed, Math.min(opponent.speed, idealMove));
     opponent.y += actualMove;
 
-     // Keep opponent paddle within canvas bounds
     if (opponent.y < 0) {
       opponent.y = 0;
     }
@@ -477,22 +520,22 @@ function gameLoop() {
     
     drawPaddles();
     drawBall();
-    handleParticles(); // Visual particles for paddle hits
-    gravityPoints.forEach(point => point.draw(ctx)); // Draw gravity points
+    handleParticles(); 
+    gravityPoints.forEach(point => point.draw(ctx)); 
     updateScoreboard();
 
   } else if (gameState === 'paused') {
     drawPaddles();
     drawBall();
-    handleParticles(); // Keep particles animating
-    gravityPoints.forEach(point => point.draw(ctx)); // Draw gravity points
+    handleParticles(); 
+    gravityPoints.forEach(point => point.draw(ctx)); 
     updateScoreboard();
     drawPauseScreen();
   } else if (gameState === 'gameOver') {
     drawPaddles();
     drawBall();
-    handleParticles(); // Keep particles animating
-    gravityPoints.forEach(point => point.draw(ctx)); // Draw gravity points
+    handleParticles(); 
+    gravityPoints.forEach(point => point.draw(ctx)); 
     updateScoreboard();
     drawGameOverScreen();
   }
@@ -543,7 +586,6 @@ window.addEventListener('keydown', function(event) {
     case 'gameOver':
       if (event.key === 'Enter') {
         gameState = 'startScreen'; 
-        // Scores and ball will be reset when 'Enter' is pressed on startScreen again
       }
       break;
   }
@@ -551,5 +593,4 @@ window.addEventListener('keydown', function(event) {
 
 
 // Start Game
-// updateScoreboard(); // Initial scoreboard display - now handled in resetGame/gameLoop
 gameLoop();
